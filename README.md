@@ -240,6 +240,49 @@ module Maintenance
 end
 ```
 
+### Tasks with Custom Enumerators
+
+If you have a special use case requiring iteration over an unsupported
+collection type, such as external resources fetched from some API, you can
+implement the `enumerator_builder(cursor:)` method in your task instead.
+
+This method should return an Enumerator, yielding pairs of
+`[item, item_cursor]`. Maintenance Tasks takes care of persisting the current
+cursor position and will provide it as the `cursor` argument if your task is
+interrupted and resumed. The cursor is stored as a String, so your custom
+enumerator should handle serializing/deserializing the value if required.
+
+You may optionally provide an implementation for `count`, if appropriate.
+
+```ruby
+# app/tasks/maintenance/custom_enumerator_task.rb
+module Maintenance
+  class CustomEnumeratorTask < MaintenanceTasks::Task
+    def enumerator_builder(cursor:)
+      Enumerator.new do |yielder|
+        after_id = cursor
+        loop do
+          posts = PostAPI.index(after_id: after_id)
+
+          posts.each do |post|
+            yielder.yield([post, post.id])
+          end
+
+          break if posts.none?
+
+          after_id = posts.last.id
+        end
+      end
+    end
+
+    def process(post)
+      Post.create!(post)
+    end
+  end
+end
+
+```
+
 ### Throttling
 
 Maintenance Tasks often modify a lot of data and can be taxing on your database.
